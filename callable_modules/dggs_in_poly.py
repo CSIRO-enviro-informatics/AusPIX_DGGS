@@ -7,7 +7,8 @@ Joseph Bell Geoscience Australia 2019
 
 '''
 
-from dggs import RHEALPixDGGS
+import os 
+from AusPIXengine.dggs import RHEALPixDGGS
 import shapefile
 import numpy
 
@@ -58,11 +59,7 @@ def point_set_from_bounds(resolution, ul, dr):
             pointset.append(newpt)
     return pointset
 
-def poly_to_DGGS_tool(myPoly, resolution):  # one poly and the attribute record for it
-    ''' a function to calculate DGGS cells within a polygon
-    mypoly is the shape of the polygon
-    resolution is the DGGS resolution required '''
-
+def get_cell_centers(myPoly, resolution):
     # find the bounding box of the polygon
     bbox = myPoly.bbox
     # now find DGGS points inside the poly based on our desired resolution
@@ -83,7 +80,40 @@ def poly_to_DGGS_tool(myPoly, resolution):  # one poly and the attribute record 
         thiscell = rdggs.cell_from_point(resolution, pt, plane=False)
         if thiscell not in cell_list:
             cell_list.append(thiscell)
+    return cell_list
 
+def get_cell_centroids_list(cell_list):
+    bboxCentroids = list() # declare a container to hold bbox centriods list for all the cells
+    for cell in cell_list:  # for each cell in the bounding box
+        # print(cell, cell.nucleus(plane=False))
+        location = cell.nucleus(plane=False)  # on the ellipsoid
+        # make a list of cell location and x and y
+        thisCentroid = [str(cell), location[0], location[1]]  # adds the xy too
+        #print('thisCent = ', thisCentroid)
+        bboxCentroids.append(thisCentroid)
+    return bboxCentroids
+
+def shapely_poly_to_DGGS_tool(myPoly, resolution):  # one poly and the attribute record for it
+    cell_list = get_cell_centers(myPoly, resolution)
+    bboxCentroids = get_cell_centroids_list(cell_list)
+    return shapefile_cell_in_polygon(cell_list, bboxCentroids, myPoly)
+
+def shapefile_cell_in_polygon(cell_list, bboxCentroids, myPoly):
+    insidePoly = list()
+    for myPoint in bboxCentroids:
+        x = myPoint[1]
+        y = myPoint[2]
+        shapely_point = shapely.geometry.Point(x,y,0)
+        if myPoly.contains(shapely_point):
+            insidePoly.append(myPoint)
+    return insidePoly
+
+def poly_to_DGGS_tool(myPoly, resolution):  # one poly and the attribute record for it
+    ''' a function to calculate DGGS cells within a polygon
+    mypoly is the shape of the polygon
+    resolution is the DGGS resolution required '''
+
+    cell_list = get_cell_centers(myPoly, resolution)
 
     # # call function to calculate all the cells within the bounding box  - this function is not working properly in the S area
     # used point_set_from_bounds function above instead
@@ -97,15 +127,11 @@ def poly_to_DGGS_tool(myPoly, resolution):  # one poly and the attribute record 
     #print('num cells in bb = ', len(cell_list))
 
     # now find the centroids of those cells using dggs engine
-    bboxCentroids = list() # declare a container to hold bbox centriods list for all the cells
-    for cell in cell_list:  # for each cell in the bounding box
-        # print(cell, cell.nucleus(plane=False))
-        location = cell.nucleus(plane=False)  # on the ellipsoid
-        # make a list of cell location and x and y
-        thisCentroid = [str(cell), location[0], location[1]]  # adds the xy too
-        #print('thisCent = ', thisCentroid)
-        bboxCentroids.append(thisCentroid)
+    bboxCentroids = get_cell_centroids_list(cell_list)
+    
+    return cell_in_polygon(myPoly, bboxCentroids, cell_list)
 
+def cell_in_polygon(myPoly, bboxCentroids, cell_list):
     # we now have a list of centroids within bounding box
     # now filter out the cell centroids that are not inside the actual polygon
     insidePoly = list()
@@ -154,10 +180,8 @@ def poly_to_DGGS_tool(myPoly, resolution):  # one poly and the attribute record 
                 polyStart = pt
                 previous = pt
 
-
     # now we have a list of edges
 
-    # check section
 
     # now check if this centroid point is in poly
     for myPoint in bboxCentroids:
@@ -225,22 +249,40 @@ def poly_to_DGGS_tool(myPoly, resolution):  # one poly and the attribute record 
     return insidePoly
 
 if __name__ == '__main__':
-
+    import tempfile
+    import geopandas as gpd 
     # note this 'main' will not run if called from another module
 
-    testPoly = r"\\xxxxxxxxxxxxx\WaterBodiesNeo\Irrigated_Areas\SampleTest_Irrigation.shp"
+    testPoly = r"./test_data/geelong/Geelong_POS.shp"
 
     # read in the file
-    sf = shapefile.Reader(testPoly)
+    orig_shape_df = gpd.GeoDataFrame.from_file(testPoly)
+    ll_shape_df = orig_shape_df.to_crs({'proj': 'longlat', 'ellps':'WGS84', 'datum': 'WGS84'})
+    temporary_directory = tempfile.mkdtemp()
+    temp_shape_file_name = os.path.join(temporary_directory, "temp_shape_file.shp")
+    ll_shape_df.to_file(temp_shape_file_name)
 
     # get the attribute table records (combined with shapes)
-    irrPolys = sf.shapeRecords()
     # firstShape = shapeRecs[0].shape
-
+    sf = shapefile.Reader(temp_shape_file_name)
+    irrPolys = sf.shapeRecords()
     index = 0
-    for fea in irrPolys:  # for feature in attribute table
+    polygon_cells = []
+    # check section
 
-            cells = poly_to_DGGS_tool(fea.shape, 10)  # start at DGGS level 10
+    shapely_avail = True 
+    if shapely_avail:
+        import shapely 
+        irrPolys = ll_shape_df.geometry.values
 
-    # for item in cellsInPoly:
-    #     print(item)
+    for fea in irrPolys[0:300]:  # for feature in attribute table
+            if shapely_avail:
+                fea.bbox=fea.bounds
+                polygon_cells.append(shapely_poly_to_DGGS_tool(fea, 10))  # start at DGGS level 10
+            else:
+                polygon_cells.append(poly_to_DGGS_tool(fea.shape, 10))  # start at DGGS level 10
+    import shutil
+    shutil.rmtree(temporary_directory)
+
+    for item in polygon_cells:
+        print(item)
