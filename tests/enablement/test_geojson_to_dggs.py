@@ -50,7 +50,7 @@ def get_cells_in_feature(fea, resolution):
     #listPolyCoords = list(polygon.exterior.coords)
     cells = []
     if isinstance(geom, LineString) or isinstance(geom, MultiLineString): 
-        res_cells = line_to_DGGS(geom, resolution)  # start at DGGS level 10   
+        res_cells = line_to_DGGS(curr_coords, resolution)  # start at DGGS level 10   
         cells = [str(item) for item in res_cells] 
     elif isinstance(geom, Polygon) or  isinstance(geom, MultiPolygon):
         res_cells = cells_in_poly(thisbbox, curr_coords, resolution)  # start at DGGS level 10    
